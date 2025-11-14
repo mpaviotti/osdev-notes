@@ -558,45 +558,33 @@ call main
 \end{lstlisting}
 \end{enumerate}
 
-\subsection{The A20 Line}
-After A20 is
-enabled, memory above 1 MB is safely accessible and you can proceed to set the
-PE bit and perform the far jump.
-
-In summary, enabling the A20 line ensures that the CPU can safely access all
-memory beyond the 1 MB boundary, while the actual switch to protected mode is
-controlled separately by setting the PE bit and updating the segment registers
-with the Global Descriptor Table.
-
 \section{Scheduler}
-
-The scheduler is the component of the operating system responsible for
-managing process execution and performing context switches between them.
-In essence, it determines which process should run next and ensures that
-each process receives a fair share of CPU time.
+The scheduler is the component of the operating system responsible for managing
+process execution and performing context switches between them.  In essence, it
+determines which process should run next and ensures that each process receives
+a fair share of CPU time.
 
 In this implementation, the scheduler follows a \textit{round-robin} strategy
 and is tightly integrated with the interrupt-handling subsystem, as it relies
-directly on hardware interrupts. Without interrupts, there would be no
-mechanism to preempt the currently running process, which would otherwise
-continue executing indefinitely.
+directly on hardware interrupts. Without interrupts, there would be no mechanism
+to preempt the currently running process, which would otherwise continue
+executing indefinitely.
 
 \subsection{The Interrupt Dispatch Sequence}
-
 Before diving into the scheduling logic, it is important to understand how
 interrupts work at the CPU level, as the entire scheduler is built on top of
 this mechanism.
 
-An \textbf{interrupt} is a signal sent to the CPU—either from hardware (e.g.,
-a keyboard press, a timer tick) or software (via the \texttt{INT} instruction)—
+An \textbf{interrupt} is a signal sent to the CPU—either from hardware (e.g., a
+keyboard press, a timer tick) or software (via the \texttt{INT} instruction)—
 requesting immediate attention. When an interrupt occurs, the CPU suspends its
 current execution flow and transfers control to a predefined handler routine
 called an \textbf{Interrupt Service Routine} (ISR).
 
-This process is automatic and implemented entirely in hardware. The CPU
-performs a series of well-defined steps to preserve the current execution
-context before jumping to the ISR. These steps ensure that, once the interrupt
-has been serviced, execution can resume seamlessly as if nothing happened.
+This process is automatic and implemented entirely in hardware. The CPU performs
+a series of well-defined steps to preserve the current execution context before
+jumping to the ISR. These steps ensure that, once the interrupt has been
+serviced, execution can resume seamlessly as if nothing happened.
 
 When an interrupt is triggered, the CPU performs the following operations:
 
@@ -622,16 +610,15 @@ developer, but typically begins by
   \item saves the interrupt number
   \item saving all general-purpose registers using the \texttt{PUSHA} instruction so that the complete CPU state is preserved.
   \item saves the current stack pointer on the stack
-  \item calls the interrupt handler corresponding to the number of the interrupt. The state of the stack at this point is depicted in Figure~\ref{fig:ProcessStack}.
+  \item\label{interrupt:saved} calls the interrupt handler corresponding to the number of the interrupt. The state of the stack at this point is depicted in Figure~\ref{fig:ProcessStack}.
   \item restores the stack pointer (\texttt{SP})
   \item restores all registers (\texttt{POPA})
   \item throws away the interrupt number
   \item restore the interrupts
   \item calls \texttt{IRET} which restores \texttt{CS:EIP} and \texttt{EFLAGS} effectively returning the control to the code that was interrupted (or the new thread that has been set to run next!)
 \end{enumerate}
-The whole process is depicted in Figure~\ref{fig:KernelProcessScheduling}.
 Once the registers have been saved, the ISR may call a higher-level interrupt
-handler—in this system, the function \texttt{\_irq\_handler}. This function
+handler --- in this system, the function \texttt{\_irq\_handler}. This function
 receives a pointer to the saved register frame (the process’s current stack
 state) and may perform tasks such as acknowledging the interrupt, handling I/O,
 or invoking the scheduler.
@@ -647,40 +634,30 @@ makes preemptive multitasking possible, as the kernel can transparently suspend
 one process and resume another.
 
 \subsection{Context switching via interrupts}
-
 Now that we understand the hardware-level behavior, we can examine how the
 scheduler leverages this mechanism to switch between processes.
 
-After that, the \texttt{PUSHA} instruction saves all general-purpose
-registers. The current stack pointer (\texttt{ESP}) is moved into
-\texttt{EAX}, and then \texttt{EAX} itself is pushed onto the stack. At this
-point, the function \texttt{\_irq\_handler} receives the stack address as a
-32-bit \texttt{unsigned int} argument.
+When an interrupt is triggered the job of the routine \texttt{isr\_common} is to
+save the state of the machine and call the \texttt{\_irq\_handler}. At this
+point the stack looks like as in Figure~\ref{fig:ProcessStack}. Notice that the
+address of the stack is stored in the stack itself (\texttt{ESP\_OLD}).
 
-
-The context-switching mechanism operates as follows: when
-\texttt{\_irq\_handler} returns, the reverse process occurs—registers are
-restored with \texttt{POP} instructions, and finally the \texttt{CS:EIP} pair
-is popped from the stack by \texttt{IRET}, returning control to the routine
-that was executing before the interrupt.
-
-The key idea is simple: if we change the stack address (\texttt{ESP}) to point
-to a different stack—one that contains another process’s saved context—then,
-when \texttt{\_irq\_handler} returns, the CPU will restore the state of that
-process instead. When \texttt{CS:EIP} is popped, execution resumes in the newly
-selected process.
-
+The key idea, depicted in Figure~\ref{fig:KernelProcessScheduling}, of scheduling is simple: if we change the stack address
+(\texttt{ESP\_OLD}) to point to a different stack (\texttt{ESP\_NEW}) --- one
+that contains the new process’s saved context -- then, when
+\texttt{\_irq\_handler} returns, the CPU will restore the state of that process
+instead. When \texttt{CS:EIP} contained in the new stack frame is popped by
+\text{IRET}, execution resumes in the newly selected process.
 
 To achieve this, the scheduler modifies the value passed to
 \texttt{\_irq\_handler}, which represents the address of the current stack.
-When \texttt{\_irq\_handler} completes, the instruction
-
 \begin{verbatim}
 popl %eax
+mov %eax, %esp
 \end{verbatim}
 
 places the modified value into \texttt{EAX}, which is then restored into
-\texttt{ESP}—completing the context switch.
+\texttt{ESP} --- completing the context switch.
 
 \subsection{Invoking the scheduler}
 
@@ -696,8 +673,6 @@ is called to modify the stack pointer based on the current scheduling policy.
 from the clock interrupt handler. However, during early development it can be
 placed in the keyboard handler, allowing the user to manually generate
 interrupts (ticks) to test process switching and time quantum expiration.
-
-\bigskip
 
 Once this mechanism is understood, the rest of the scheduler becomes
 straightforward. The \texttt{schedule()} function simply selects a
@@ -746,7 +721,7 @@ This structure represents the stack in reverse order.
 To understand why, consider how memory grows in the x86 architecture. If we
 visualize memory as increasing from address \texttt{0x00000000} (bottom) to
 \texttt{0xFFFFFFFF} (top), then \texttt{EDI} will appear first and
-\texttt{EFLAGS} last, because the stack grows downward—from higher to lower
+\texttt{EFLAGS} last, because the stack grows downward -- from higher to lower
 addresses.
 
 For the same reason, if we allocate 2~MB for a stack, the address used to
@@ -758,123 +733,47 @@ stackframe *stack =
     (stackframe *)(kmalloc(STACK_MAX_SIZE) + STACK_MAX_SIZE - 100);
 \end{lstlisting}
 
-This routine captures the essence of the scheduler—arguably the most intricate
-component to fully grasp. Once the principles of interrupt-driven context
-switching and the behavior of \texttt{IRET} are understood, the rest of the
-system’s scheduling logic follows naturally.
-% \section{Interrupts and Multitasking}
-% Interrupts allow the CPU to respond to hardware events or timers asynchronously.
-% The IDT maps interrupt vectors to handler routines. Using interrupts, we can
-% implement preemptive multitasking by switching between tasks at regular
-% intervals.
-
-% \subsection{Implementing Multitasking via Timer Interrupts}
-% A timer interrupt fires periodically, saving the current task state and
-% restoring the next task's state. This involves:
-
-% 1. Saving all general-purpose registers and segment selectors.
-% 2. Storing the stack pointer and relevant task information.
-% 3. Selecting the next task in a round-robin fashion.
-% 4. Restoring its registers and stack pointer.
-% 5. Returning from the interrupt to resume execution.
-
-% \begin{lstlisting}[style=asm,caption={Minimal task switch on timer interrupt}]
-% timer_handler:
-%     pusha                  ; save all general-purpose registers
-%     mov eax, [current_task]
-%     mov [task_stack + eax*4], esp
-%     mov [task_ds + eax*4], ds
-%     inc eax
-%     and eax, 1             ; assume 2 tasks
-%     mov [current_task], eax
-%     mov esp, [task_stack + eax*4]
-%     mov ds, [task_ds + eax*4]
-%     popa                   ; restore registers
-%     iret                   ; return from interrupt
-% \end{lstlisting}
+This routine captures the essence of the scheduler --- arguably the most
+intricate component to fully grasp. Once the principles of interrupt-driven
+context switching and the behavior of \texttt{IRET} are understood, the rest of
+the system’s scheduling logic follows naturally.
 
 \section{Compiling and Linking the Binaries}
 
-Prepare the environment:
+If you are using a Linux system you just need to make sure you have all the
+tools to compile the kernel: gcc, nasm, make, build-essential and qemu or bochs
+to run the kernel.  If you are on a Mac, there is no easy way to get ahold of a
+C compiler for an Intel 32-bit architecture because GCC on Mac is a symlink to
+Clang.  Hence you need to install Docker and simulate a Debian shell, install
+all the packages and compile the source files from there.  Then on your Mac
+machine you can run QEMU to test your kernel.
+
+Here is what I do within my Mac. Download first the kernel with :
+\begin{verbatim}
+git clone git@github.com:mpaviotti/Markix.git
+\end{verbatim}
+
+I enter the Markix directory and run Docker:
 \begin{verbatim}
 cd [Markix Dir]
 docker run --platform linux/386 -it --rm -v "$PWD":/src -w /src debian:bookworm bash
+\end{verbatim}
+Then I install all the packages I need and I compile using the Makefile
+\begin{verbatim}
 apt update
 apt install gcc nasm make build-essential
 make
 \end{verbatim}
 
-
+On my Mac, I install QEMU using Brew and then run the kernel
 \begin{verbatim}
-brew install nasm bochs qemu
-mkdir x86_lab
-cd x86_lab
-touch boot.asm bochsrc.txt
+brew install qemu
+qemu-system-i386 -fda kernel.bin -boot a -m 32
 \end{verbatim}
 
-\subsection{Step 2: Write Bootloader}
-
-\begin{lstlisting}[style=asm]
-ORG 0x7C00
-BITS 16
-start:
-    cli
-    xor ax, ax
-    mov ds, ax
-    mov es, ax
-    lgdt [gdt_descriptor]
-    mov eax, cr0
-    or eax, 1
-    mov cr0, eax
-    jmp 0x08:protected
-
-[BITS 32]
-protected:
-    mov ax, 0x10
-    mov ds, ax
-    mov es, ax
-    mov ss, ax
-    mov esp, 0x90000
-    mov edi, 0xB8000
-    mov byte [edi], 'O'
-    mov byte [edi+1], 0x07
-    hlt
-
-gdt_start:
-    dq 0x0000000000000000
-    dq 0x00CF9A000000FFFF
-    dq 0x00CF92000000FFFF
-gdt_end:
-
-gdt_descriptor:
-    dw gdt_end - gdt_start - 1
-    dd gdt_start
-
-TIMES 510-($-$$) DB 0
-DW 0xAA55
-\end{lstlisting}
-
-\subsection{Step 3: Assemble the Bootloader and Create Floppy Disk Image}
-
-First, assemble your NASM bootloader into a flat binary:
-
+There is also an option of running QEMU from the Makefile
 \begin{verbatim}
-nasm -f bin boot.asm -o boot.bin
-\end{verbatim}
-
-Then, create a floppy disk image for Bochs:
-\begin{verbatim}
-dd if=/dev/zero of=floppy.img bs=512 count=2880
-dd if=boot.bin of=floppy.img conv=notrunc
-\end{verbatim}
-
-
-\subsection{Step 4: Run with QEMU}
-
-For simplicity, you can run directly with QEMU:
-
-\begin{verbatim}
-qemu-system-i386 -fda boot.img -boot a -m 32
+make qemu
 \end{verbatim}
 
 
